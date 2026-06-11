@@ -1,0 +1,83 @@
+
+# ─────────────────────────────────────────────────────────────────────
+# Anti-Cheating Proctoring System — Docker Compose (Production / EC2)
+#
+# Redis: AWS ElastiCache Serverless (external — NOT a local container)
+#   Endpoint: anticheatredis-qzzou5.serverless.aps1.cache.amazonaws.com:6379
+#
+# Services on EC2:
+#   api     — FastAPI WebSocket server (multi-instance safe)
+#   worker  — ML inference worker (stateless, scalable)
+#
+# Scale independently:
+#   docker compose up --scale api=3 --scale worker=4
+#
+# Production ALB:
+#   Enable sticky sessions (cookie-based, 2h duration)
+#   so each student WebSocket reconnects to the same API instance.
+# ─────────────────────────────────────────────────────────────────────
+
+services:
+
+  # ── FastAPI WebSocket API (multi-instance) ───────────────────────────
+  # Scale: docker compose up --scale api=3
+  # NOTE: No container_name here — that would block --scale.
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "8000"   # random host port per instance (ALB handles external routing)
+    environment:
+      # ✅ AWS ElastiCache Serverless endpoint (replaces local redis service)
+      - REDIS_HOST=anticheatredis-qzzou5.serverless.aps1.cache.amazonaws.com
+      - REDIS_PORT=6379
+      # Max frames in queue before this instance drops new frames
+      - BACKPRESSURE_LIMIT=500
+      # Max frames per second per user (queue fairness)
+      - MAX_FPS_PER_USER=3
+      # API_INSTANCE_ID defaults to container hostname (unique per scaled instance)
+      # Override here if needed: - API_INSTANCE_ID=api-1
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ── ML Worker (scalable) ────────────────────────────────────────────
+  # Each container = 1 worker process = handles ~8-10 FPS
+  # Scale: docker compose up --scale worker=4
+  worker:
+    build:
+      context: ./worker_redis
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      #  AWS ElastiCache Serverless endpoint (replaces local redis service)
+      - REDIS_HOST=anticheatredis-qzzou5.serverless.aps1.cache.amazonaws.com
+      - REDIS_PORT=6379
+      - MODELS_DIR=/app
+    volumes:
+      # Mount model files from project root into worker container
+      - ./best.pt:/app/best.pt:ro
+      - ./yolov8n.pt:/app/yolov8n.pt:ro
+      - ./face_landmarker.task:/app/face_landmarker.task:ro
+
+    #  These limits ACTUALLY work with: docker compose up
+    # deploy.resources only works in Docker Swarm — these do not.
+    # c6i.xlarge: 4 vCPU, 8 GB RAM → safe for 4 workers × (1 CPU, 2 GB each)
+    mem_limit: 2g
+    cpus: 1.0
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
