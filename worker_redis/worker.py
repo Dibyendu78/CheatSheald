@@ -88,6 +88,8 @@ def _connect_redis() -> redis.Redis:
                 port=REDIS_PORT,
                 db=0,
                 decode_responses=True,
+                ssl=True,           # required for AWS ElastiCache in-transit encryption
+                ssl_cert_reqs=None, # skip cert verification (AWS managed certs)
                 socket_connect_timeout=5,
                 socket_timeout=5,
             )
