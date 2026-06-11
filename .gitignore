@@ -1,0 +1,67 @@
+# ─────────────────────────────────────────────────────────────────────
+# .gitignore — Anti-Cheating Proctoring System
+# ─────────────────────────────────────────────────────────────────────
+
+# ── Secrets & Environment ─────────────────────────────────────────────
+.env
+*.pem
+*.key
+*.p12
+*.pfx
+
+# ── Python ────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+*.cover
+
+# ── Virtual Environments ──────────────────────────────────────────────
+venv/
+.venv/
+env/
+audio_env/
+
+# ── ML Model Files (large binaries — store in S3 or Git LFS) ─────────
+*.pt
+*.pth
+*.onnx
+*.tflite
+*.task
+*.csv
+
+# ── Docker ────────────────────────────────────────────────────────────
+# Keep docker-compose.yml but ignore local override files
+docker-compose.override.yml
+
+# ── Node / Frontend ───────────────────────────────────────────────────
+node_modules/
+frontend/dist/
+frontend/build/
+frontend/.env
+frontend/.env.local
+frontend/.env.production.local
+
+# ── IDE & OS ──────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# ── Logs ──────────────────────────────────────────────────────────────
+*.log
+logs/

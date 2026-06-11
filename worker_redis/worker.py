@@ -25,6 +25,10 @@ import time
 from pathlib import Path
 
 import redis
+from dotenv import load_dotenv
+
+# Load .env file when running locally (no-op inside Docker where env is injected)
+load_dotenv()
 
 # Ensure models directory on path
 sys.path.insert(0, str(Path(__file__).resolve().parent))

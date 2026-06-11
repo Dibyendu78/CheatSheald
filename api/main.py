@@ -29,6 +29,11 @@ import socket
 import time
 from typing import Dict
 
+from dotenv import load_dotenv
+
+# Load .env file when running locally (no-op inside Docker where env is injected)
+load_dotenv()
+
 import redis.asyncio as aioredis
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
