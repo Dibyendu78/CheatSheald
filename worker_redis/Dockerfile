@@ -15,9 +15,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
-# Python deps (ML + Redis only)
+# Python deps — install CPU-only PyTorch first (saves ~1.5GB vs CUDA version)
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir \
+    torch==2.2.2+cpu torchvision==0.17.2+cpu \
+    --index-url https://download.pytorch.org/whl/cpu \
+ && pip install --no-cache-dir -r requirements.txt
 
 # Worker code
 COPY worker.py .
