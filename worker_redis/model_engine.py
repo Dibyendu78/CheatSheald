@@ -20,11 +20,18 @@ from typing import Optional
 os.environ.setdefault("MPLCONFIGDIR", "/tmp/matplotlib")
 os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")
 
+import torch
 import cv2
 import mediapipe as mp
 import numpy as np
 from mediapipe.tasks.python import vision
 from ultralytics import YOLO
+from ultralytics.nn.tasks import DetectionModel
+
+# PyTorch 2.6+ defaults to weights_only=True in torch.load().
+# Our YOLO .pt files use pickle serialization — allowlist the
+# model classes so they can be loaded safely.
+torch.serialization.add_safe_globals([DetectionModel])
 
 # ──────────────────────────────────────────────
 # Constants
