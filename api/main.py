@@ -120,8 +120,10 @@ async def startup_event() -> None:
                 decode_responses=True,
                 ssl=True,           # required for AWS ElastiCache in-transit encryption
                 ssl_cert_reqs=None, # skip cert verification (AWS managed certs)
-                socket_connect_timeout=5,
-                socket_timeout=5,
+                socket_connect_timeout=10,
+                socket_timeout=None,          # pub/sub listener blocks forever — no timeout
+                socket_keepalive=True,        # prevent ElastiCache from killing idle connections
+                health_check_interval=30,     # periodic PING to keep connection alive
             )
             await redis_client.ping()
             logger.info(f"Redis connected on attempt {attempt} ({REDIS_HOST}:{REDIS_PORT})")
@@ -157,38 +159,58 @@ async def result_listener() -> None:
 
     ✅ No broadcast — only this instance receives this message.
     ✅ Zero wasted CPU on other instances.
+    ✅ Auto-reconnects on timeout/disconnect (ElastiCache drops idle pub/sub).
     """
-    pubsub = redis_client.pubsub()
-    await pubsub.subscribe(MY_RESULT_CHANNEL)
-    logger.info(f"Subscribed to: {MY_RESULT_CHANNEL}")
-
-    async for message in pubsub.listen():
-        if message["type"] != "message":
-            continue
+    while True:  # reconnect loop — survives connection drops
+        pubsub = None
         try:
-            payload = json.loads(message["data"])
-            user_id = payload.get("user_id")
-            result  = payload.get("result")
+            pubsub = redis_client.pubsub()
+            await pubsub.subscribe(MY_RESULT_CHANNEL)
+            logger.info(f"Subscribed to: {MY_RESULT_CHANNEL}")
 
-            if not user_id:
-                continue
+            async for message in pubsub.listen():
+                if message["type"] != "message":
+                    continue
+                try:
+                    payload = json.loads(message["data"])
+                    user_id = payload.get("user_id")
+                    result  = payload.get("result")
 
-            ws = active_connections.get(user_id)
-            if ws is None:
-                # Should not happen if routing is correct — log but don't error
-                _stats["results_missed"] += 1
-                logger.warning(f"Result arrived for user={user_id} but no WS on this instance")
-                continue
+                    if not user_id:
+                        continue
 
-            await ws.send_text(json.dumps({
-                "type":    "result",
-                "user_id": user_id,
-                "result":  result,
-            }))
-            _stats["results_delivered"] += 1
+                    ws = active_connections.get(user_id)
+                    if ws is None:
+                        # Should not happen if routing is correct — log but don't error
+                        _stats["results_missed"] += 1
+                        logger.warning(f"Result arrived for user={user_id} but no WS on this instance")
+                        continue
 
+                    await ws.send_text(json.dumps({
+                        "type":    "result",
+                        "user_id": user_id,
+                        "result":  result,
+                    }))
+                    _stats["results_delivered"] += 1
+
+                except Exception as e:
+                    logger.error(f"result_listener processing error: {e}")
+
+        except (asyncio.TimeoutError, TimeoutError) as e:
+            logger.warning(f"Redis pub/sub timeout, reconnecting in 1s: {e}")
+        except (ConnectionError, OSError) as e:
+            logger.warning(f"Redis pub/sub connection lost, reconnecting in 1s: {e}")
         except Exception as e:
-            logger.error(f"result_listener error: {e}")
+            logger.error(f"Redis pub/sub unexpected error, reconnecting in 2s: {e}")
+            await asyncio.sleep(1)  # extra backoff for unknown errors
+        finally:
+            if pubsub:
+                try:
+                    await pubsub.unsubscribe(MY_RESULT_CHANNEL)
+                    await pubsub.close()
+                except Exception:
+                    pass
+        await asyncio.sleep(1)  # brief backoff before reconnect
 
 
 # ── WebSocket Endpoint ────────────────────────────────────────────────────────
