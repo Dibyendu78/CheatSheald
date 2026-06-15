@@ -31,24 +31,23 @@ from ultralytics import YOLO
 # ──────────────────────────────────────────────
 GAZE_DIRECTIONS = {"LEFT", "RIGHT", "UP", "DOWN"}
 
+# Only flag items a student should NOT have during a proctored exam.
+# laptop/computer/monitor/keyboard/mouse are the student's own equipment — NOT suspicious.
 SUSPICIOUS_OBJECT_KEYWORDS = {
     "book",
     "cell phone",
     "phone",
     "mobile",
-    "laptop",
     "tablet",
-    "computer",
-    "monitor",
-    "keyboard",
-    "mouse",
-    "remote",
-    "tv",
 }
 
-PERSON_CONF_THRESHOLD = 0.25
-OBJECT_CONF_THRESHOLD = 0.20
-INFERENCE_WIDTH = 416      # resize input to this width for speed
+PERSON_CONF_THRESHOLD = 0.50    # Raised from 0.25 — reduces false multi-person detections
+OBJECT_CONF_THRESHOLD = 0.40    # Raised from 0.20 — reduces spurious object detections
+INFERENCE_WIDTH = 416            # resize input to this width for speed
+
+# Minimum bounding box area (as fraction of frame area) for a person detection to count.
+# Tiny boxes are usually artifacts (e.g. face on a phone screen, poster on wall).
+MIN_PERSON_AREA_FRAC = 0.03      # person must occupy ≥3% of frame area
 
 
 def is_suspicious_object(name: str) -> bool:
@@ -177,12 +176,21 @@ class FaceGazeTracker:
 
     def analyze(self, frame: np.ndarray) -> dict:
         """Count persons and determine gaze direction."""
-        resized, _, _ = resize_for_inference(frame, INFERENCE_WIDTH)
+        resized, sx, sy = resize_for_inference(frame, INFERENCE_WIDTH)
+        rh, rw = resized.shape[:2]
+        frame_area = rw * rh
 
-        # Person detection
+        # Person detection — with bounding box area filter
         pr = self.person_model(resized, classes=[0], conf=PERSON_CONF_THRESHOLD, verbose=False)
         boxes = pr[0].boxes
-        face_count = 0 if boxes is None else len(boxes)
+        face_count = 0
+        if boxes is not None:
+            for box in boxes:
+                x1, y1, x2, y2 = box.xyxy[0].tolist()
+                box_area = (x2 - x1) * (y2 - y1)
+                # Only count as a real person if the box is large enough
+                if box_area / frame_area >= MIN_PERSON_AREA_FRAC:
+                    face_count += 1
 
         # Gaze direction
         gaze_direction = self._gaze(resized)
@@ -285,13 +293,13 @@ class ModelEngine:
             })
 
         # Check 4: Gaze away — CENTER = OK (green), anything else = alert
-        # Simple message only — direction is NOT exposed in the alert text
+        # Severity "caution" — shown as a warning banner but does NOT count as a strike.
         gaze_ok = (gaze_direction == "CENTER")
         if not gaze_ok and face_count > 0:  # only alert if face is present
             alerts.append({
                 "type": "gaze_away",
                 "message": "Student is not looking at the screen",
-                "severity": "warning",
+                "severity": "caution",
             })
 
         cheating = len(alerts) > 0
